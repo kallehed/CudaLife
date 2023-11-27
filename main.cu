@@ -1,3 +1,4 @@
+#include "raylib.h"
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
@@ -58,12 +59,12 @@ void draw_world_in_terminal(const char *const world, const long width,
     for (long j = 0; j < width; ++j) {
       char out;
       switch (world[j + i * width]) {
-        case CELL_DEAD:
-          out = ' ';
-          break;
-        case CELL_ALIVE:
-          out = '+';
-          break;
+      case CELL_DEAD:
+        out = ' ';
+        break;
+      case CELL_ALIVE:
+        out = '+';
+        break;
       }
       putchar(out);
     }
@@ -71,12 +72,41 @@ void draw_world_in_terminal(const char *const world, const long width,
   }
 }
 
+static void draw_world_raylib(const char *const world, const long width,
+                              const long height) {
+  Vector2 size = {16, 16};
+  for (long i = 0; i < height; ++i) {
+    for (long j = 0; j < width; ++j) {
+      if (world[j + i * width]) {
+        Vector2 v = Vector2{float(j) * size.x, float(i) * size.y};
+        DrawRectangleV(v, size, WHITE);
+      }
+    }
+  }
+}
+
 static constexpr long WIDTH = 32;
 static constexpr long HEIGHT = 32;
 static constexpr long WORLD_BYTES = sizeof(char) * WIDTH * HEIGHT;
-
 static constexpr dim3 BLOCKDIM_WORLD = dim3{32, 32, 1};
 static constexpr dim3 GRIDDIM_WORLD = dim3{1, 1, 1};
+
+static void transform_world(char *const d_world, const long width,
+                            const long height) {
+  transform_cell<<<GRIDDIM_WORLD, BLOCKDIM_WORLD>>>(d_world, width, height);
+  cudaDeviceSynchronize();
+}
+
+static void randomize_world(char *const h_world, char *const d_world,
+                            const long width, const long height) {
+  for (int i = 1; i < height - 1; ++i) {
+    for (int j = 1; j < width - 1; ++j) {
+      h_world[j + i * width] = rand() % 2;
+    }
+  }
+  // upload to device from host
+  cudaMemcpy(d_world, h_world, WORLD_BYTES, cudaMemcpyHostToDevice);
+}
 
 // game of life, use shared memory so a 32x32 part will load into shared memory
 // their values, and the middle 30x30 part will calculate but start by using
@@ -90,31 +120,26 @@ int main() {
   // array2D_set<<<GRIDDIM_WORLD, BLOCKDIM_WORLD>>>(d_world, WIDTH, CELL_DEAD);
   // cudaDeviceSynchronize();
 
-  // set host to random
-  for (int i = 1; i < HEIGHT - 1; ++i) {
-    for (int j = 1; j < WIDTH - 1; ++j) {
-      h_world[j + i * WIDTH] = rand() % 2;
+  randomize_world(h_world, d_world, WIDTH, HEIGHT);
+
+  draw_world_in_terminal(h_world, WIDTH, HEIGHT);
+  puts("--------------------------------");
+
+  InitWindow(800, 800, "cudalife");
+  // SetTargetFPS(60);
+  while (!WindowShouldClose()) // Detect window close button or ESC key
+  {
+    if (IsKeyPressed(KEY_R)) {
+      randomize_world(h_world, d_world, WIDTH, HEIGHT);
     }
-  }
-  // upload to device from host
-  cudaMemcpy(d_world, h_world, WORLD_BYTES, cudaMemcpyHostToDevice);
-
-  for (int iter = 0; iter < 10000; ++iter) {
-    transform_cell<<<GRIDDIM_WORLD, BLOCKDIM_WORLD>>>(d_world, WIDTH, HEIGHT);
-    cudaDeviceSynchronize();
-
-    // copy back to host
+    transform_world(d_world, WIDTH, HEIGHT);
+    BeginDrawing();
+    ClearBackground(BLACK);
+    // copy from device to host
     cudaMemcpy(h_world, d_world, WORLD_BYTES, cudaMemcpyDeviceToHost);
-    draw_world_in_terminal(h_world, WIDTH, HEIGHT);
-    puts("--------------------------------");
-  }
+    draw_world_raylib(h_world, WIDTH, HEIGHT);
 
-  float total_error = 0;
-  for (long i = 0; i < HEIGHT; ++i) {
-    for (long j = 0; j < WIDTH; ++j) {
-      total_error += abs(h_world[j + i * WIDTH]);
-    }
-    // std::cout << " " << h_a[i] << " ";
+    EndDrawing();
   }
-  printf("total life: %f\n" , (float)total_error);
+  CloseWindow(); // Close window and OpenGL context
 }
