@@ -50,6 +50,7 @@ __global__ void transform_cell(char *const world, const long width,
   default:
     next_state = CELL_DEAD;
   }
+  __syncthreads();
   world[place] = next_state;
 }
 
@@ -70,26 +71,45 @@ void draw_world_in_terminal(const char *const world, const long width,
     }
     putchar('\n');
   }
+  puts("--------------------------------");
 }
+
+
+static Texture2D MY_TEX;
 
 static void draw_world_raylib(const char *const world, const long width,
-                              const long height) {
-  Vector2 size = {16, 16};
-  for (long i = 0; i < height; ++i) {
-    for (long j = 0; j < width; ++j) {
-      if (world[j + i * width]) {
-        Vector2 v = Vector2{float(j) * size.x, float(i) * size.y};
-        DrawRectangleV(v, size, WHITE);
-      }
-    }
+                              const long height, const long window_width,
+                              const long window_height) {
+  // Vector2 size = {window_width / (float)width, window_height / (float)height};
+  if (MY_TEX.width == window_width) {
+    UnloadTexture(MY_TEX);
   }
+  Image img = GenImageColor(window_width, window_height, WHITE); 
+  MY_TEX = LoadTextureFromImage(img);
+  // GenTextureMipmaps(&tex);
+  DrawText("ym biot wirug", 100, 100, 20, WHITE);
+  // UnloadTexture(tex);
+  UnloadImage(img);
+  
+  // for (long i = 0; i < height; ++i) {
+  //   for (long j = 0; j < width; ++j) {
+  //     if (world[j + i * width]) {
+  //       Vector2 v = Vector2{float(j) * size.x, float(i) * size.y};
+  //
+  //       DrawPixelV(v, WHITE);
+  //       // DrawRectangleV(v, size, WHITE);
+  //     }
+  //   }
+  // }
+  UpdateTexture(MY_TEX, world);
+  DrawTexture(MY_TEX, 0, 0, WHITE);
 }
 
-static constexpr long WIDTH = 32;
-static constexpr long HEIGHT = 32;
+static constexpr long WIDTH = 2048;
+static constexpr long HEIGHT = 2048;
 static constexpr long WORLD_BYTES = sizeof(char) * WIDTH * HEIGHT;
 static constexpr dim3 BLOCKDIM_WORLD = dim3{32, 32, 1};
-static constexpr dim3 GRIDDIM_WORLD = dim3{1, 1, 1};
+static constexpr dim3 GRIDDIM_WORLD = dim3{64, 64, 1};
 
 static void transform_world(char *const d_world, const long width,
                             const long height) {
@@ -111,21 +131,20 @@ static void randomize_world(char *const h_world, char *const d_world,
 // game of life, use shared memory so a 32x32 part will load into shared memory
 // their values, and the middle 30x30 part will calculate but start by using
 // global memory and divide thread blocks into chunks that calculate new grid
-
+// array2D_set<<<GRIDDIM_WORLD, BLOCKDIM_WORLD>>>(d_world, WIDTH, CELL_DEAD);
+// cudaDeviceSynchronize();
 int main() {
   srand(time(NULL));
   char *h_world = (char *)malloc(WORLD_BYTES);
   char *d_world;
   cudaMalloc(&d_world, WORLD_BYTES);
-  // array2D_set<<<GRIDDIM_WORLD, BLOCKDIM_WORLD>>>(d_world, WIDTH, CELL_DEAD);
-  // cudaDeviceSynchronize();
 
   randomize_world(h_world, d_world, WIDTH, HEIGHT);
 
   draw_world_in_terminal(h_world, WIDTH, HEIGHT);
-  puts("--------------------------------");
 
-  InitWindow(800, 800, "cudalife");
+  const long window_width = 1024, window_height = 1024;
+  InitWindow(window_width, window_height, "cudalife");
   // SetTargetFPS(60);
   while (!WindowShouldClose()) // Detect window close button or ESC key
   {
@@ -137,8 +156,15 @@ int main() {
     ClearBackground(BLACK);
     // copy from device to host
     cudaMemcpy(h_world, d_world, WORLD_BYTES, cudaMemcpyDeviceToHost);
-    draw_world_raylib(h_world, WIDTH, HEIGHT);
+    draw_world_raylib(h_world, WIDTH, HEIGHT, window_width, window_height);
 
+    {
+      float dt = GetFrameTime();
+      char buf[256];
+      int written = snprintf(buf, sizeof(buf) - 1, "fps: %f", 1.f/dt); 
+      buf[written] = '\0';
+      DrawText(buf, 10, 10, 20, GREEN);
+    }
     EndDrawing();
   }
   CloseWindow(); // Close window and OpenGL context
