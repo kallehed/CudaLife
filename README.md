@@ -1,10 +1,11 @@
 
 ### Dependencies: 
 - download cuda
-- have raylib version 5.01 on system (on arch linux use `yay raylib`to download)
+- have glfw on system (`yay glfw-x11`)
+- have OpenGL
 
 ### Compile
-- `nvcc main.cu -lraylib -o main`
+- `nvcc main.cu -lglfw -o main`
 ### Run 
 - `./main`
 

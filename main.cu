@@ -1,8 +1,11 @@
-#include "raylib.h"
+#include "include/glad/glad.h"
+#include <GL/glext.h>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
+#define GLFW_INCLUDE_NONE
+#include <GLFW/glfw3.h>
 
 #define Chk(ans)                                                               \
   { gpuAssert((ans), __FILE__, __LINE__); }
@@ -75,28 +78,6 @@ void draw_world_in_terminal(const char *const world, const long width,
   puts("--------------------------------");
 }
 
-
-static void draw_world_raylib(const char *const world, const long width,
-                              const long height, const long window_width,
-                              const long window_height, Texture2D render_tex, unsigned char *picture) {
-  // Vector2 size = {window_width / (float)width, window_height /
-  // (float)height};
-
-
-  for (long i = 0; i < height; ++i) {
-    for (long j = 0; j < width; ++j) {
-      long idx = (j + i * width) * 4;
-      // picture[idx + 3] = 255;
-      char res = world[j + i * width];
-      uint32_t bits = (res == 0) ? 0 : 0b11111111111111111111111111111111;
-
-      *(uint32_t *)(&picture[idx]) = bits;
-    }
-  }
-  UpdateTexture(render_tex, picture);
-  DrawTexture(render_tex, 0, 0, WHITE);
-}
-
 static constexpr long WIDTH = 2048;
 static constexpr long HEIGHT = 2048;
 static constexpr long WORLD_BYTES = sizeof(char) * WIDTH * HEIGHT;
@@ -119,6 +100,9 @@ static void randomize_world(char *const h_world, char *const d_world,
   // upload to device from host
   cudaMemcpy(d_world, h_world, WORLD_BYTES, cudaMemcpyHostToDevice);
 }
+void framebuffer_size_callback(GLFWwindow *window, int width, int height) {
+  glViewport(0, 0, width, height);
+}
 
 // game of life, use shared memory so a 32x32 part will load into shared memory
 // their values, and the middle 30x30 part will calculate but start by using
@@ -133,41 +117,111 @@ int main() {
 
   randomize_world(h_world, d_world, WIDTH, HEIGHT);
 
-  unsigned char *picture = (unsigned char *)malloc(WIDTH * HEIGHT * sizeof(char) * 4);
-
   // draw_world_in_terminal(h_world, WIDTH, HEIGHT);
 
-  const long window_width = 2048, window_height = 2048;
-  InitWindow(window_width, window_height, "cudalife");
-  Texture2D render_tex;
+  // const long window_width = 2048, window_height = 2048;
+  const long window_width = 1024, window_height = 1024;
+  glfwInit();
+  glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
+  glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
+  glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+  GLFWwindow *window =
+      glfwCreateWindow(window_width, window_height, "CudaLife", NULL, NULL);
+  glfwMakeContextCurrent(window);
+  // gladLoadGL(glfwGetProcAddress());
+  gladLoadGLLoader((GLADloadproc)glfwGetProcAddress);
+  glViewport(0, 0, 800, 800);
+  glfwSwapInterval(1);
+  glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
+
+  float vertices[] = {
+      -1.f, -1.f, 0.f, 0.f, 1.f, 0.f, 1.f, -1.f, 0.f,
+  };
+  unsigned int VBO;
+  glGenBuffers(1, &VBO);
+  glBindBuffer(GL_ARRAY_BUFFER, VBO);
+  glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+  const char *const vertex_shader_source =
+      "#version 460\n"
+      "layout (location = 0) in vec3 aPos;\n"
+      "void main()\n"
+      "{\n"
+      " gl_Position = vec4(aPos.x, aPos.y, aPos.z, 1.0);\n"
+      "}\0";
+  unsigned int vertex_shader = glCreateShader(GL_VERTEX_SHADER);
+  glShaderSource(vertex_shader, 1, &vertex_shader_source, NULL);
+  glCompileShader(vertex_shader);
   {
-    Image img = GenImageColor(WIDTH, HEIGHT, WHITE);
-    render_tex = LoadTextureFromImage(img);
-    UnloadImage(img);
-  }
-  // SetTargetFPS(60);
-  while (!WindowShouldClose()) // Detect window close button or ESC key
-  {
-    if (IsKeyPressed(KEY_R)) {
-      randomize_world(h_world, d_world, WIDTH, HEIGHT);
+    int success;
+    char infoLog[512];
+    glGetShaderiv(vertex_shader, GL_COMPILE_STATUS, &success);
+    if (!success) {
+      glGetShaderInfoLog(vertex_shader, 512, NULL, infoLog);
+      printf("ERROR::SHADER::VERTEX::COMPILATION_FAILED\n %s\n", infoLog);
     }
-    // transform_world(d_world, WIDTH, HEIGHT);
-    BeginDrawing();
-    ClearBackground(BLACK);
-    // copy from device to host
-    cudaMemcpy(h_world, d_world, WORLD_BYTES, cudaMemcpyDeviceToHost);
-    draw_world_raylib(h_world, WIDTH, HEIGHT, window_width, window_height, render_tex, picture);
+  }
+  const char *const fragment_shader_source =
+    "#version 460 core\n"
+    "out vec4 FragColor;\n"
+    "void main() {\n"
+    " FragColor = vec4(1.0f, 0.5f, 0.2f, 1.0f);\n"
+    "}\n";
+  unsigned int fragment_shader;
+  fragment_shader = glCreateShader(GL_FRAGMENT_SHADER);
+  glShaderSource(fragment_shader, 1, &fragment_shader_source, NULL);
+  glCompileShader(fragment_shader);
+  {
+    int success;
+    char infoLog[512];
+    glGetShaderiv(fragment_shader, GL_COMPILE_STATUS, &success);
+    if (!success) {
+      glGetShaderInfoLog(fragment_shader, 512, NULL, infoLog);
+      printf("ERROR::SHADER::FRAGMENT::COMPILATION_FAILED\n %s\n", infoLog);
+    }
+  }
+  unsigned int shader_program;
+  shader_program = glCreateProgram();
+  glAttachShader(shader_program, vertex_shader);
+  glAttachShader(shader_program, fragment_shader);
+  glLinkProgram(shader_program);
+  {
+    int success;
+    char infoLog[512];
+    glGetProgramiv(shader_program, GL_LINK_STATUS, &success);
+    if(!success) {
+        glGetProgramInfoLog(shader_program, 512, NULL, infoLog);
+        printf("ERROR::PROGRAM::COMPILATION_FAILED\n %s\n", infoLog);
+    }
+  }
+  glDeleteShader(vertex_shader);
+  glDeleteShader(fragment_shader);  
+  // SetTargetFPS(60);
+  double dt = 0.16, prev_time = 0;
+  while (!glfwWindowShouldClose(window)) {
+    glfwPollEvents();
 
     {
-      float dt = GetFrameTime();
+      double time = glfwGetTime();
+      dt = time - prev_time;
+      prev_time = time;
+    }
+    if (glfwGetKey(window, GLFW_KEY_R) == GLFW_PRESS) {
+      randomize_world(h_world, d_world, WIDTH, HEIGHT);
+    }
+    glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+    // transform_world(d_world, WIDTH, HEIGHT);
+    // copy from device to host
+    cudaMemcpy(h_world, d_world, WORLD_BYTES, cudaMemcpyDeviceToHost);
+
+    {
       char buf[256];
       int written = snprintf(buf, sizeof(buf) - 1, "fps: %f", 1.f / dt);
       buf[written] = '\0';
-      DrawText(buf, 10, 10, 50, RED);
+      printf("%s", buf);
     }
-    EndDrawing();
+    glfwSwapBuffers(window);
   }
-  free(picture);
-  UnloadTexture(render_tex);
-  CloseWindow(); // Close window and OpenGL context
+  glfwDestroyWindow(window);
+  glfwTerminate();
 }
