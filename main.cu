@@ -1,4 +1,5 @@
 #include "raylib.h"
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
@@ -75,34 +76,25 @@ void draw_world_in_terminal(const char *const world, const long width,
 }
 
 
-static Texture2D MY_TEX;
-
 static void draw_world_raylib(const char *const world, const long width,
                               const long height, const long window_width,
-                              const long window_height) {
-  // Vector2 size = {window_width / (float)width, window_height / (float)height};
-  if (MY_TEX.width == window_width) {
-    UnloadTexture(MY_TEX);
+                              const long window_height, Texture2D render_tex, unsigned char *picture) {
+  // Vector2 size = {window_width / (float)width, window_height /
+  // (float)height};
+
+
+  for (long i = 0; i < height; ++i) {
+    for (long j = 0; j < width; ++j) {
+      long idx = (j + i * width) * 4;
+      // picture[idx + 3] = 255;
+      char res = world[j + i * width];
+      uint32_t bits = (res == 0) ? 0 : 0b11111111111111111111111111111111;
+
+      *(uint32_t *)(&picture[idx]) = bits;
+    }
   }
-  Image img = GenImageColor(window_width, window_height, WHITE); 
-  MY_TEX = LoadTextureFromImage(img);
-  // GenTextureMipmaps(&tex);
-  DrawText("ym biot wirug", 100, 100, 20, WHITE);
-  // UnloadTexture(tex);
-  UnloadImage(img);
-  
-  // for (long i = 0; i < height; ++i) {
-  //   for (long j = 0; j < width; ++j) {
-  //     if (world[j + i * width]) {
-  //       Vector2 v = Vector2{float(j) * size.x, float(i) * size.y};
-  //
-  //       DrawPixelV(v, WHITE);
-  //       // DrawRectangleV(v, size, WHITE);
-  //     }
-  //   }
-  // }
-  UpdateTexture(MY_TEX, world);
-  DrawTexture(MY_TEX, 0, 0, WHITE);
+  UpdateTexture(render_tex, picture);
+  DrawTexture(render_tex, 0, 0, WHITE);
 }
 
 static constexpr long WIDTH = 2048;
@@ -141,31 +133,41 @@ int main() {
 
   randomize_world(h_world, d_world, WIDTH, HEIGHT);
 
-  draw_world_in_terminal(h_world, WIDTH, HEIGHT);
+  unsigned char *picture = (unsigned char *)malloc(WIDTH * HEIGHT * sizeof(char) * 4);
 
-  const long window_width = 1024, window_height = 1024;
+  // draw_world_in_terminal(h_world, WIDTH, HEIGHT);
+
+  const long window_width = 2048, window_height = 2048;
   InitWindow(window_width, window_height, "cudalife");
+  Texture2D render_tex;
+  {
+    Image img = GenImageColor(WIDTH, HEIGHT, WHITE);
+    render_tex = LoadTextureFromImage(img);
+    UnloadImage(img);
+  }
   // SetTargetFPS(60);
   while (!WindowShouldClose()) // Detect window close button or ESC key
   {
     if (IsKeyPressed(KEY_R)) {
       randomize_world(h_world, d_world, WIDTH, HEIGHT);
     }
-    transform_world(d_world, WIDTH, HEIGHT);
+    // transform_world(d_world, WIDTH, HEIGHT);
     BeginDrawing();
     ClearBackground(BLACK);
     // copy from device to host
     cudaMemcpy(h_world, d_world, WORLD_BYTES, cudaMemcpyDeviceToHost);
-    draw_world_raylib(h_world, WIDTH, HEIGHT, window_width, window_height);
+    draw_world_raylib(h_world, WIDTH, HEIGHT, window_width, window_height, render_tex, picture);
 
     {
       float dt = GetFrameTime();
       char buf[256];
-      int written = snprintf(buf, sizeof(buf) - 1, "fps: %f", 1.f/dt); 
+      int written = snprintf(buf, sizeof(buf) - 1, "fps: %f", 1.f / dt);
       buf[written] = '\0';
-      DrawText(buf, 10, 10, 20, GREEN);
+      DrawText(buf, 10, 10, 50, RED);
     }
     EndDrawing();
   }
+  free(picture);
+  UnloadTexture(render_tex);
   CloseWindow(); // Close window and OpenGL context
 }
