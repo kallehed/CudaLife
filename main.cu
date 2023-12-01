@@ -1,11 +1,12 @@
 #include "include/glad/glad.h"
 #include <GL/glext.h>
-#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
+
+#include <cuda_gl_interop.h>
 
 #define Chk(ans)                                                               \
   { gpuAssert((ans), __FILE__, __LINE__); }
@@ -90,15 +91,22 @@ static void transform_world(char *const d_world, const long width,
   cudaDeviceSynchronize();
 }
 
-static void randomize_world(char *const h_world, char *const d_world,
-                            const long width, const long height) {
-  for (int i = 1; i < height - 1; ++i) {
-    for (int j = 1; j < width - 1; ++j) {
-      h_world[j + i * width] = rand() % 2;
+static void randomize_world(unsigned int SSBO) {
+    char *data = (char *)malloc(WORLD_BYTES);
+    for (int i = 0; i < HEIGHT; ++i) {
+      for (int j = 0; j < WIDTH; ++j) {
+        char value;
+        if (i == 0 || i == HEIGHT - 1 || j == 0 || j == WIDTH - 1) {
+          value = 0;
+        }
+        else {
+          value = rand()%2;
+        }
+        data[i * WIDTH + j] = value;
+      }
     }
-  }
-  // upload to device from host
-  cudaMemcpy(d_world, h_world, WORLD_BYTES, cudaMemcpyHostToDevice);
+    glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, WORLD_BYTES, data);
+    free(data);
 }
 int g_current_window_width = 1024, g_current_window_height = 1024;
 void framebuffer_size_callback(GLFWwindow *window, int width, int height) {
@@ -117,17 +125,12 @@ void framebuffer_size_callback(GLFWwindow *window, int width, int height) {
 
 int main() {
   srand(time(NULL));
-  char *h_world = (char *)malloc(WORLD_BYTES);
-  char *d_world;
-  cudaMalloc(&d_world, WORLD_BYTES);
-
-  randomize_world(h_world, d_world, WIDTH, HEIGHT);
 
   // draw_world_in_terminal(h_world, WIDTH, HEIGHT);
 
   // const long window_width = 2048, window_height = 2048;
   glfwInit();
-  glfwWindowHint(GLFW_DOUBLEBUFFER, GL_FALSE);
+  // glfwWindowHint(GLFW_DOUBLEBUFFER, GL_FALSE);
   glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
   glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
   glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
@@ -219,9 +222,20 @@ int main() {
   unsigned int SSBO;
   glGenBuffers(1, &SSBO);
   glBindBuffer(GL_SHADER_STORAGE_BUFFER, SSBO);
-  glBufferData(GL_SHADER_STORAGE_BUFFER, WORLD_BYTES, NULL, GL_DYNAMIC_DRAW);
+  {
+    char *data = (char *)malloc(WORLD_BYTES);
+    for (int i = 0; i < WORLD_BYTES; ++i) {
+      data[i] = rand() % 2;
+    }
+    glBufferData(GL_SHADER_STORAGE_BUFFER, WORLD_BYTES, data, GL_DYNAMIC_DRAW);
+    free(data);
+  }
   glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
   glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, SSBO);
+
+  struct cudaGraphicsResource *SSBO_CUDA;
+
+  Chk(cudaGraphicsGLRegisterBuffer(&SSBO_CUDA, SSBO, cudaGraphicsMapFlagsNone));
 
   int u_pos_and_scale_location =
       glGetUniformLocation(shader_program, "u_pos_and_scale");
@@ -231,7 +245,7 @@ int main() {
   while (!glfwWindowShouldClose(window)) {
     glfwPollEvents();
     if (glfwGetKey(window, GLFW_KEY_R) == GLFW_PRESS) {
-      randomize_world(h_world, d_world, WIDTH, HEIGHT);
+      randomize_world(SSBO);
     }
     float speed = 500.f * dt;
     if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) {
@@ -262,9 +276,14 @@ int main() {
                (1.f / scale);
     }
 
-    transform_world(d_world, WIDTH, HEIGHT);
+    {
+      Chk(cudaGraphicsMapResources(1, &SSBO_CUDA, 0));
+      void *my_data;
+      Chk(cudaGraphicsResourceGetMappedPointer(&my_data, NULL, SSBO_CUDA));
+      transform_world((char *)my_data, WIDTH, HEIGHT);
+      cudaGraphicsUnmapResources(1, &SSBO_CUDA);
+    }
     // copy from device to host
-    cudaMemcpy(h_world, d_world, WORLD_BYTES, cudaMemcpyDeviceToHost);
 
     {
       double time = glfwGetTime();
@@ -278,9 +297,6 @@ int main() {
       glUseProgram(shader_program);
       glUniform4f(u_pos_and_scale_location, pos_x, pos_y, scale, scale);
       glBindVertexArray(VAO);
-      glBindBuffer(GL_SHADER_STORAGE_BUFFER, SSBO);
-      glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, WORLD_BYTES, h_world);
-      glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
       glDrawArrays(GL_TRIANGLES, 0, 6);
     }
 
@@ -293,8 +309,8 @@ int main() {
       // printf("%s", buf);
     }
 
-    // glfwSwapBuffers(window);
-    glFlush();
+    glfwSwapBuffers(window);
+    // glFlush();
   }
   glfwDestroyWindow(window);
   glfwTerminate();
