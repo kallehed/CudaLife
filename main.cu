@@ -102,9 +102,10 @@ static void randomize_world(char *const h_world, char *const d_world,
 }
 int g_current_window_width = 1024, g_current_window_height = 1024;
 void framebuffer_size_callback(GLFWwindow *window, int width, int height) {
-  glViewport(0, 0, width, height); g_current_window_width = width; g_current_window_height = height;
+  glViewport(0, 0, width, height);
+  g_current_window_width = width;
+  g_current_window_height = height;
 }
-
 
 // game of life, use shared memory so a 32x32 part will load into shared memory
 // their values, and the middle 30x30 part will calculate but start by using
@@ -130,10 +131,9 @@ int main() {
   glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
   glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
   glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-  GLFWwindow *window =
-      glfwCreateWindow(g_current_window_width, g_current_window_height, "CudaLife", NULL, NULL);
+  GLFWwindow *window = glfwCreateWindow(
+      g_current_window_width, g_current_window_height, "CudaLife", NULL, NULL);
   glfwMakeContextCurrent(window);
-  // gladLoadGL(glfwGetProcAddress());
   gladLoadGLLoader((GLADloadproc)glfwGetProcAddress);
   glViewport(0, 0, g_current_window_width, g_current_window_height);
   glfwSwapInterval(SWAP_INTERVAL);
@@ -161,6 +161,7 @@ int main() {
       printf("ERROR::SHADER::VERTEX::COMPILATION_FAILED\n %s\n", infoLog);
     }
   }
+  // clang-format off
   const char *const fragment_shader_source =
       "#version 460 core\n"
       "out vec4 FragColor;\n"
@@ -181,6 +182,7 @@ int main() {
       "  if (x >= 2048 || y >= 2048) {col = 0.5;}"
       "  FragColor = vec4(vec3(float(col)), 1.0f);\n"
       "}\n";
+  // clang-format on
   unsigned int fragment_shader;
   fragment_shader = glCreateShader(GL_FRAGMENT_SHADER);
   glShaderSource(fragment_shader, 1, &fragment_shader_source, NULL);
@@ -221,7 +223,8 @@ int main() {
   glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
   glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, SSBO);
 
-  int u_pos_and_scale_location = glGetUniformLocation(shader_program, "u_pos_and_scale");
+  int u_pos_and_scale_location =
+      glGetUniformLocation(shader_program, "u_pos_and_scale");
   float pos_x = 0.f, pos_y = 0.f, scale = 1.f;
 
   double dt = 0.16, prev_time = 0.0;
@@ -246,13 +249,17 @@ int main() {
     float scale_speed = 1 * dt * scale;
     if (glfwGetKey(window, GLFW_KEY_I) == GLFW_PRESS) {
       scale += scale_speed;
-       pos_x += (pos_x + (float)(g_current_window_width >> 1)) * scale_speed * (1.f/scale);
-       pos_y += (pos_y + (float)(g_current_window_height >> 1)) * scale_speed * (1.f/scale);
+      pos_x += (pos_x + (float)(g_current_window_width >> 1)) * scale_speed *
+               (1.f / scale);
+      pos_y += (pos_y + (float)(g_current_window_height >> 1)) * scale_speed *
+               (1.f / scale);
     }
     if (glfwGetKey(window, GLFW_KEY_O) == GLFW_PRESS) {
       scale -= scale_speed;
-       pos_x -= (pos_x + (float)(g_current_window_width >> 1)) * scale_speed * (1.f/scale);
-       pos_y -= (pos_y + (float)(g_current_window_height >> 1)) * scale_speed * (1.f/scale);
+      pos_x -= (pos_x + (float)(g_current_window_width >> 1)) * scale_speed *
+               (1.f / scale);
+      pos_y -= (pos_y + (float)(g_current_window_height >> 1)) * scale_speed *
+               (1.f / scale);
     }
 
     transform_world(d_world, WIDTH, HEIGHT);
