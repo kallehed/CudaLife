@@ -100,9 +100,11 @@ static void randomize_world(char *const h_world, char *const d_world,
   // upload to device from host
   cudaMemcpy(d_world, h_world, WORLD_BYTES, cudaMemcpyHostToDevice);
 }
+int g_current_window_width = 1024, g_current_window_height = 1024;
 void framebuffer_size_callback(GLFWwindow *window, int width, int height) {
-  glViewport(0, 0, width, height);
+  glViewport(0, 0, width, height); g_current_window_width = width; g_current_window_height = height;
 }
+
 
 // game of life, use shared memory so a 32x32 part will load into shared memory
 // their values, and the middle 30x30 part will calculate but start by using
@@ -123,17 +125,17 @@ int main() {
   // draw_world_in_terminal(h_world, WIDTH, HEIGHT);
 
   // const long window_width = 2048, window_height = 2048;
-  const long window_width = 1024, window_height = 1024;
   glfwInit();
+  glfwWindowHint(GLFW_DOUBLEBUFFER, GL_FALSE);
   glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
   glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
   glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
   GLFWwindow *window =
-      glfwCreateWindow(window_width, window_height, "CudaLife", NULL, NULL);
+      glfwCreateWindow(g_current_window_width, g_current_window_height, "CudaLife", NULL, NULL);
   glfwMakeContextCurrent(window);
   // gladLoadGL(glfwGetProcAddress());
   gladLoadGLLoader((GLADloadproc)glfwGetProcAddress);
-  glViewport(0, 0, window_width, window_height);
+  glViewport(0, 0, g_current_window_width, g_current_window_height);
   glfwSwapInterval(SWAP_INTERVAL);
   glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
 
@@ -162,17 +164,22 @@ int main() {
   const char *const fragment_shader_source =
       "#version 460 core\n"
       "out vec4 FragColor;\n"
+      "uniform vec4 u_pos_and_scale;"
       "layout (std430, binding = 0) buffer Colors {\n"
-      " float color[2048 * 2048];\n"
+      "  uint color[(2048 * 2048)/4];\n"
       "};\n"
       "void main() {\n"
-      " int x = int(gl_FragCoord.x/1.0 );\n"
-      " int y = int(gl_FragCoord.y/1.0 );\n"
-      " float col = 0.5;\n"
-      " if (x < 2048 && y < 2048) {col = color[x  + y * 2048]; if (x %2 == 3) "
-      "{col = "
-      "0.75;}}\n"
-      " FragColor = vec4(vec3(col), 1.0f);\n"
+      "  uint x = uint((gl_FragCoord.x + u_pos_and_scale.x)/u_pos_and_scale.z);\n"
+      "  uint y = uint((gl_FragCoord.y + u_pos_and_scale.y)/u_pos_and_scale.w);\n"
+      "  uint idx = x + y * 2048;\n"
+      "  uint block = idx / 4;\n"
+      "  uint byte = idx % 4;\n"
+      "  uint col4 = color[block];\n"
+      "  uint mask = (0x000000FF << (byte * 8));\n"
+      "  uint colbool =  mask & col4;\n"
+      "  float col = float(colbool);\n"
+      "  if (x >= 2048 || y >= 2048) {col = 0.5;}"
+      "  FragColor = vec4(vec3(float(col)), 1.0f);\n"
       "}\n";
   unsigned int fragment_shader;
   fragment_shader = glCreateShader(GL_FRAGMENT_SHADER);
@@ -210,20 +217,45 @@ int main() {
   unsigned int SSBO;
   glGenBuffers(1, &SSBO);
   glBindBuffer(GL_SHADER_STORAGE_BUFFER, SSBO);
-  glBufferData(GL_SHADER_STORAGE_BUFFER, WIDTH * HEIGHT * sizeof(float), NULL,
-               GL_DYNAMIC_DRAW);
+  glBufferData(GL_SHADER_STORAGE_BUFFER, WORLD_BYTES, NULL, GL_DYNAMIC_DRAW);
   glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
   glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, SSBO);
 
+  int u_pos_and_scale_location = glGetUniformLocation(shader_program, "u_pos_and_scale");
+  float pos_x = 0.f, pos_y = 0.f, scale = 1.f;
+
   double dt = 0.16, prev_time = 0.0;
-  float *a = (float *)malloc(WIDTH * HEIGHT * sizeof(float));
   while (!glfwWindowShouldClose(window)) {
     glfwPollEvents();
     if (glfwGetKey(window, GLFW_KEY_R) == GLFW_PRESS) {
       randomize_world(h_world, d_world, WIDTH, HEIGHT);
     }
+    float speed = 500.f * dt;
+    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) {
+      pos_x += speed;
+    }
+    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) {
+      pos_x -= speed;
+    }
+    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) {
+      pos_y += speed;
+    }
+    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) {
+      pos_y -= speed;
+    }
+    float scale_speed = 1 * dt * scale;
+    if (glfwGetKey(window, GLFW_KEY_I) == GLFW_PRESS) {
+      scale += scale_speed;
+       pos_x += (pos_x + (float)(g_current_window_width >> 1)) * scale_speed * (1.f/scale);
+       pos_y += (pos_y + (float)(g_current_window_height >> 1)) * scale_speed * (1.f/scale);
+    }
+    if (glfwGetKey(window, GLFW_KEY_O) == GLFW_PRESS) {
+      scale -= scale_speed;
+       pos_x -= (pos_x + (float)(g_current_window_width >> 1)) * scale_speed * (1.f/scale);
+       pos_y -= (pos_y + (float)(g_current_window_height >> 1)) * scale_speed * (1.f/scale);
+    }
 
-    // transform_world(d_world, WIDTH, HEIGHT);
+    transform_world(d_world, WIDTH, HEIGHT);
     // copy from device to host
     cudaMemcpy(h_world, d_world, WORLD_BYTES, cudaMemcpyDeviceToHost);
 
@@ -237,16 +269,10 @@ int main() {
 
     {
       glUseProgram(shader_program);
+      glUniform4f(u_pos_and_scale_location, pos_x, pos_y, scale, scale);
       glBindVertexArray(VAO);
-      float sum = 0;
-      for (int i = 0; i < WIDTH; ++i) {
-        for (int j = 0; j < HEIGHT; ++j) {
-          a[i * WIDTH + j] = (float)h_world[i * WIDTH + j];
-        }
-      }
       glBindBuffer(GL_SHADER_STORAGE_BUFFER, SSBO);
-      glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0,
-                      WIDTH * HEIGHT * sizeof(float), (float *)a);
+      glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, WORLD_BYTES, h_world);
       glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
       glDrawArrays(GL_TRIANGLES, 0, 6);
     }
@@ -259,9 +285,10 @@ int main() {
       glfwSetWindowTitle(window, buf);
       // printf("%s", buf);
     }
-    glfwSwapBuffers(window);
+
+    // glfwSwapBuffers(window);
+    glFlush();
   }
-  free(a);
   glfwDestroyWindow(window);
   glfwTerminate();
 }
