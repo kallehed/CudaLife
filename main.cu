@@ -61,6 +61,47 @@ __global__ void transform_cell(char *const world, const long width,
   __syncthreads();
   world[place] = next_state;
 }
+// look at 32x32 squares, everyone saves to shared memory, but only middle 30x30
+// part writes. We also spawn overlapping 32x32 grid next to this one, which
+// will handle the edge cases.
+__global__ void transform_cell_better(char *const world, const long width,
+                                      const long height) {
+  __shared__ char shared_32x32[32][32];
+  // positions on actual life grid
+  const long actual_x = blockIdx.x * (blockDim.x - 2) + threadIdx.x;
+  const long actual_y = blockIdx.y * (blockDim.y - 2) + threadIdx.y;
+  const char cur_state = world[actual_y * width + actual_x]; // important write
+  shared_32x32[threadIdx.y][threadIdx.x] = cur_state;
+
+  __syncthreads(); // sync block so everyone has written to shared buffer
+
+  if (threadIdx.x == 0 || threadIdx.x == 31 || threadIdx.y == 0 ||
+      threadIdx.y == 31)
+    return; // edges of thread block should disappear
+
+  // relative x and y for brevity in neighbor calculatio
+  const int x = threadIdx.x;
+  const int y = threadIdx.y;
+  const char neighbors =
+      shared_32x32[y][x + 1] + shared_32x32[y][x - 1] + shared_32x32[y + 1][x] +
+      shared_32x32[y - 1][x] + shared_32x32[y + 1][x + 1] +
+      shared_32x32[y + 1][x - 1] + shared_32x32[y - 1][x + 1] +
+      shared_32x32[y - 1][x - 1];
+
+  char next_state;
+  switch (neighbors) {
+  case 2:
+    next_state = cur_state;
+    break;
+  case 3:
+    next_state = CELL_ALIVE;
+    break;
+  default:
+    next_state = CELL_DEAD;
+  }
+  __syncthreads();
+  world[actual_y * width + actual_x] = next_state; // write back to device mem
+}
 
 void draw_world_in_terminal(const char *const world, const long width,
                             const long height) {
@@ -70,9 +111,9 @@ void draw_world_in_terminal(const char *const world, const long width,
       switch (world[j + i * width]) {
       case CELL_DEAD:
         out = ' ';
-        break;     
+        break;
       case CELL_ALIVE:
-        out = '+'; 
+        out = '+';
         break;
       }
       putchar(out);
@@ -92,7 +133,8 @@ static constexpr dim3 GRIDDIM_WORLD = dim3{WIDTH / 32, HEIGHT / 32, 1};
 
 static void transform_world(char *const d_world, const long width,
                             const long height) {
-  transform_cell<<<GRIDDIM_WORLD, BLOCKDIM_WORLD>>>(d_world, width, height);
+  transform_cell_better<<<GRIDDIM_WORLD, BLOCKDIM_WORLD>>>(d_world, width,
+                                                           height);
   cudaDeviceSynchronize();
 }
 
@@ -272,6 +314,7 @@ int main() {
     }
 
     // Current bottleneck
+    // if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) {
     if (!false) {
       Chk(cudaGraphicsMapResources(1, &SSBO_CUDA, 0));
       void *ssbo_mapped_to_cuda;

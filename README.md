@@ -29,4 +29,6 @@ maybe:
 
 - as previous, but now CUDA data is sent directly to SSBO, shader does bit manipulation of 32 uints to turn them into bools - getting 800 FPS at NO CELL TRANSFORMING - while 730 fps with transforming, practically no difference for -O3.
 
-- as previous, but now we have a OpenGL SSBO (shader storage buffer object) which CUDA writes directly to, and OpenGL draws it immediately. So now the CPU basically does nothing. The shader does bit operations to get the right state of it's cell. 
+- as previous, but now we have a OpenGL SSBO (shader storage buffer object) which CUDA writes directly to, and OpenGL draws it immediately. So now the CPU basically does nothing. The shader does bit operations to get the right state of it's cell - 900 fps 
+
+- Tested doing shared memory where blocks filled in for each other's corners, but got exact same framerate
