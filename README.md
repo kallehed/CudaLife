@@ -32,3 +32,5 @@ maybe:
 - as previous, but now we have a OpenGL SSBO (shader storage buffer object) which CUDA writes directly to, and OpenGL draws it immediately. So now the CPU basically does nothing. The shader does bit operations to get the right state of it's cell - 900 fps 
 
 - Tested doing shared memory where blocks filled in for each other's corners, but got exact same framerate
+
+- Instead of manually doing sampling of an SSBO I will now try a texture instead. Seems to not have as good framerate, and very wobbly
