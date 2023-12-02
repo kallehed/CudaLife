@@ -8,6 +8,9 @@
 
 #include <cuda_gl_interop.h>
 
+#define STR_INDIR(x) #x
+#define STR(x) STR_INDIR(x)
+
 #define Chk(ans)                                                               \
   { gpuAssert((ans), __FILE__, __LINE__); }
 inline void gpuAssert(cudaError_t code, const char *file, int line,
@@ -67,9 +70,9 @@ void draw_world_in_terminal(const char *const world, const long width,
       switch (world[j + i * width]) {
       case CELL_DEAD:
         out = ' ';
-        break;
+        break;     
       case CELL_ALIVE:
-        out = '+';
+        out = '+'; 
         break;
       }
       putchar(out);
@@ -79,11 +82,13 @@ void draw_world_in_terminal(const char *const world, const long width,
   puts("--------------------------------");
 }
 
-static constexpr long WIDTH = 2048;
-static constexpr long HEIGHT = 2048;
+// width and height of game of life cell 2D array
+#define WIDTH 2048
+#define HEIGHT 2048
 static constexpr long WORLD_BYTES = sizeof(char) * WIDTH * HEIGHT;
-static constexpr dim3 BLOCKDIM_WORLD = dim3{32, 32, 1};
-static constexpr dim3 GRIDDIM_WORLD = dim3{64, 64, 1};
+static constexpr dim3 BLOCKDIM_WORLD =
+    dim3{32, 32, 1}; // 32 * 32 is the maximum block
+static constexpr dim3 GRIDDIM_WORLD = dim3{WIDTH / 32, HEIGHT / 32, 1};
 
 static void transform_world(char *const d_world, const long width,
                             const long height) {
@@ -91,22 +96,22 @@ static void transform_world(char *const d_world, const long width,
   cudaDeviceSynchronize();
 }
 
+// slow, copies using OpenGL, inits on CPU
 static void randomize_world(unsigned int SSBO) {
-    char *data = (char *)malloc(WORLD_BYTES);
-    for (int i = 0; i < HEIGHT; ++i) {
-      for (int j = 0; j < WIDTH; ++j) {
-        char value;
-        if (i == 0 || i == HEIGHT - 1 || j == 0 || j == WIDTH - 1) {
-          value = 0;
-        }
-        else {
-          value = rand()%2;
-        }
-        data[i * WIDTH + j] = value;
+  char *data = (char *)malloc(WORLD_BYTES);
+  for (int i = 0; i < HEIGHT; ++i) {
+    for (int j = 0; j < WIDTH; ++j) {
+      char value;
+      if (i == 0 || i == HEIGHT - 1 || j == 0 || j == WIDTH - 1) {
+        value = 0;
+      } else {
+        value = rand() % 2;
       }
+      data[i * WIDTH + j] = value;
     }
-    glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, WORLD_BYTES, data);
-    free(data);
+  }
+  glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, WORLD_BYTES, data);
+  free(data);
 }
 int g_current_window_width = 1024, g_current_window_height = 1024;
 void framebuffer_size_callback(GLFWwindow *window, int width, int height) {
@@ -126,9 +131,6 @@ void framebuffer_size_callback(GLFWwindow *window, int width, int height) {
 int main() {
   srand(time(NULL));
 
-  // draw_world_in_terminal(h_world, WIDTH, HEIGHT);
-
-  // const long window_width = 2048, window_height = 2048;
   glfwInit();
   // glfwWindowHint(GLFW_DOUBLEBUFFER, GL_FALSE);
   glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
@@ -170,19 +172,19 @@ int main() {
       "out vec4 FragColor;\n"
       "uniform vec4 u_pos_and_scale;"
       "layout (std430, binding = 0) buffer Colors {\n"
-      "  uint color[(2048 * 2048)/4];\n"
+      "  uint color[(" STR(WIDTH) "*" STR(HEIGHT) " )/4];\n" 
       "};\n"
       "void main() {\n"
       "  uint x = uint((gl_FragCoord.x + u_pos_and_scale.x)/u_pos_and_scale.z);\n"
       "  uint y = uint((gl_FragCoord.y + u_pos_and_scale.y)/u_pos_and_scale.w);\n"
-      "  uint idx = x + y * 2048;\n"
+      "  uint idx = x + y * " STR(WIDTH) ";\n"
       "  uint block = idx / 4;\n"
       "  uint byte = idx % 4;\n"
       "  uint col4 = color[block];\n"
       "  uint mask = (0x000000FF << (byte * 8));\n"
       "  uint colbool =  mask & col4;\n"
       "  float col = float(colbool);\n"
-      "  if (x >= 2048 || y >= 2048) {col = 0.5;}"
+      "  if (x >= " STR(WIDTH) " || y >= " STR(HEIGHT) ") {col = 0.5;}"
       "  FragColor = vec4(vec3(float(col)), 1.0f);\n"
       "}\n";
   // clang-format on
@@ -222,19 +224,12 @@ int main() {
   unsigned int SSBO;
   glGenBuffers(1, &SSBO);
   glBindBuffer(GL_SHADER_STORAGE_BUFFER, SSBO);
-  {
-    char *data = (char *)malloc(WORLD_BYTES);
-    for (int i = 0; i < WORLD_BYTES; ++i) {
-      data[i] = rand() % 2;
-    }
-    glBufferData(GL_SHADER_STORAGE_BUFFER, WORLD_BYTES, data, GL_DYNAMIC_DRAW);
-    free(data);
-  }
+  glBufferData(GL_SHADER_STORAGE_BUFFER, WORLD_BYTES, NULL, GL_DYNAMIC_DRAW);
   glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
   glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, SSBO);
+  randomize_world(SSBO);
 
   struct cudaGraphicsResource *SSBO_CUDA;
-
   Chk(cudaGraphicsGLRegisterBuffer(&SSBO_CUDA, SSBO, cudaGraphicsMapFlagsNone));
 
   int u_pos_and_scale_location =
@@ -276,14 +271,15 @@ int main() {
                (1.f / scale);
     }
 
-    {
+    // Current bottleneck
+    if (!false) {
       Chk(cudaGraphicsMapResources(1, &SSBO_CUDA, 0));
-      void *my_data;
-      Chk(cudaGraphicsResourceGetMappedPointer(&my_data, NULL, SSBO_CUDA));
-      transform_world((char *)my_data, WIDTH, HEIGHT);
+      void *ssbo_mapped_to_cuda;
+      Chk(cudaGraphicsResourceGetMappedPointer(&ssbo_mapped_to_cuda, NULL,
+                                               SSBO_CUDA));
+      transform_world((char *)ssbo_mapped_to_cuda, WIDTH, HEIGHT);
       cudaGraphicsUnmapResources(1, &SSBO_CUDA);
     }
-    // copy from device to host
 
     {
       double time = glfwGetTime();
@@ -293,20 +289,19 @@ int main() {
     glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
 
-    {
+    if (!false) {
       glUseProgram(shader_program);
       glUniform4f(u_pos_and_scale_location, pos_x, pos_y, scale, scale);
       glBindVertexArray(VAO);
       glDrawArrays(GL_TRIANGLES, 0, 6);
     }
 
-    {
+    if (!false) {
       char buf[256];
       int written =
           snprintf(buf, sizeof(buf) - 1, "CudaLife: fps: %f", 1.f / dt);
       buf[written] = '\0';
       glfwSetWindowTitle(window, buf);
-      // printf("%s", buf);
     }
 
     glfwSwapBuffers(window);
