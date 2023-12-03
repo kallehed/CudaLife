@@ -23,7 +23,8 @@ inline void gpuAssert(cudaError_t code, const char *file, int line,
   }
 }
 
-__global__ void array2D_set(char *a, const long width, const char val) {
+__global__ void array2D_set(unsigned char *a, const long width,
+                            const unsigned char val) {
   a[(threadIdx.x + blockIdx.x * blockDim.x) +
     (threadIdx.y + blockIdx.y * blockDim.y) * width] = val;
 }
@@ -31,64 +32,28 @@ __global__ void array2D_set(char *a, const long width, const char val) {
 #define CELL_DEAD 0
 #define CELL_ALIVE 1
 
-__global__ void transform_cell(char *const world, const long width,
-                               const long height) {
+// width and height of game of life cell 2D array
+#define WIDTH 2048
+#define HEIGHT 2048
+static constexpr long WORLD_BYTES = sizeof(unsigned char) * WIDTH * HEIGHT;
+static constexpr dim3 BLOCKDIM_WORLD =
+    dim3{32, 32, 1}; // 32 * 32 is the maximum block
+static constexpr dim3 GRIDDIM_WORLD = dim3{WIDTH / 32, HEIGHT / 32, 1};
+
+__global__ void transform_cell(const unsigned char *const world,
+                               unsigned char *write_world) {
   const long x = blockIdx.x * blockDim.x + threadIdx.x;
   const long y = blockIdx.y * blockDim.y + threadIdx.y;
-  if (x == 0 || x == width - 1 || y == 0 || y == height - 1)
+  if (x == 0 || x == WIDTH - 1 || y == 0 || y == HEIGHT - 1)
     return;
-  const long place = x + y * width;
-  const char cur_state = world[place];
-  const char neighbors = world[place + 1] + world[place - 1] +
-                         world[place + width] + world[place - width] +
-                         world[place + 1 - width] + world[place + 1 + width] +
-                         world[place - 1 + width] + world[place - 1 - width];
-  char next_state;
-  switch (neighbors) {
-  case 0:
-  case 1:
-    next_state = CELL_DEAD;
-    break;
-  case 2:
-    next_state = cur_state;
-    break;
-  case 3:
-    next_state = CELL_ALIVE;
-    break;
-  default:
-    next_state = CELL_DEAD;
-  }
-  __syncthreads();
-  world[place] = next_state;
-}
-// look at 32x32 squares, everyone saves to shared memory, but only middle 30x30
-// part writes. We also spawn overlapping 32x32 grid next to this one, which
-// will handle the edge cases.
-__global__ void transform_cell_better(char *const world, const long width,
-                                      const long height) {
-  __shared__ char shared_32x32[32][32];
-  // positions on actual life grid
-  const long actual_x = blockIdx.x * (blockDim.x - 2) + threadIdx.x;
-  const long actual_y = blockIdx.y * (blockDim.y - 2) + threadIdx.y;
-  const char cur_state = world[actual_y * width + actual_x]; // important write
-  shared_32x32[threadIdx.y][threadIdx.x] = cur_state;
-
-  __syncthreads(); // sync block so everyone has written to shared buffer
-
-  if (threadIdx.x == 0 || threadIdx.x == 31 || threadIdx.y == 0 ||
-      threadIdx.y == 31)
-    return; // edges of thread block should disappear
-
-  // relative x and y for brevity in neighbor calculatio
-  const int x = threadIdx.x;
-  const int y = threadIdx.y;
-  const char neighbors =
-      shared_32x32[y][x + 1] + shared_32x32[y][x - 1] + shared_32x32[y + 1][x] +
-      shared_32x32[y - 1][x] + shared_32x32[y + 1][x + 1] +
-      shared_32x32[y + 1][x - 1] + shared_32x32[y - 1][x + 1] +
-      shared_32x32[y - 1][x - 1];
-
-  char next_state;
+  const long place = x + y * WIDTH;
+  const unsigned char cur_state = world[place];
+  const unsigned char neighbors =
+      world[place + 1] + world[place - 1] + world[place + WIDTH] +
+      world[place - WIDTH] + world[place + 1 - WIDTH] +
+      world[place + 1 + WIDTH] + world[place - 1 + WIDTH] +
+      world[place - 1 - WIDTH];
+  unsigned char next_state;
   switch (neighbors) {
   case 2:
     next_state = cur_state;
@@ -99,16 +64,14 @@ __global__ void transform_cell_better(char *const world, const long width,
   default:
     next_state = CELL_DEAD;
   }
-  __syncthreads();
-  world[actual_y * width + actual_x] = next_state; // write back to device mem
+  write_world[place] = next_state;
 }
 
-void draw_world_in_terminal(const char *const world, const long width,
-                            const long height) {
-  for (long i = 0; i < height; ++i) {
-    for (long j = 0; j < width; ++j) {
-      char out;
-      switch (world[j + i * width]) {
+void draw_world_in_terminal(const unsigned char *const world) {
+  for (long i = 0; i < HEIGHT; ++i) {
+    for (long j = 0; j < WIDTH; ++j) {
+      unsigned char out;
+      switch (world[j + i * WIDTH]) {
       case CELL_DEAD:
         out = ' ';
         break;
@@ -123,27 +86,18 @@ void draw_world_in_terminal(const char *const world, const long width,
   puts("--------------------------------");
 }
 
-// width and height of game of life cell 2D array
-#define WIDTH 2048
-#define HEIGHT 2048
-static constexpr long WORLD_BYTES = sizeof(char) * WIDTH * HEIGHT;
-static constexpr dim3 BLOCKDIM_WORLD =
-    dim3{32, 32, 1}; // 32 * 32 is the maximum block
-static constexpr dim3 GRIDDIM_WORLD = dim3{WIDTH / 32, HEIGHT / 32, 1};
-
-static void transform_world(char *const d_world, const long width,
-                            const long height) {
-  transform_cell_better<<<GRIDDIM_WORLD, BLOCKDIM_WORLD>>>(d_world, width,
-                                                           height);
+static void transform_world(const unsigned char *const read_world,
+                            unsigned char *const write_world) {
+  transform_cell<<<GRIDDIM_WORLD, BLOCKDIM_WORLD>>>(read_world, write_world);
   cudaDeviceSynchronize();
 }
 
 // slow, copies using OpenGL, inits on CPU
 static void randomize_world(unsigned int SSBO) {
-  char *data = (char *)malloc(WORLD_BYTES);
+  unsigned char *data = (unsigned char *)malloc(WORLD_BYTES);
   for (int i = 0; i < HEIGHT; ++i) {
     for (int j = 0; j < WIDTH; ++j) {
-      char value;
+      unsigned char value;
       if (i == 0 || i == HEIGHT - 1 || j == 0 || j == WIDTH - 1) {
         value = 0;
       } else {
@@ -152,7 +106,9 @@ static void randomize_world(unsigned int SSBO) {
       data[i * WIDTH + j] = value;
     }
   }
+  glBindBuffer(GL_SHADER_STORAGE_BUFFER, SSBO);
   glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, WORLD_BYTES, data);
+  glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
   free(data);
 }
 int g_current_window_width = 1024, g_current_window_height = 1024;
@@ -214,7 +170,7 @@ int main() {
       "out vec4 FragColor;\n"
       "uniform vec4 u_pos_and_scale;"
       "layout (std430, binding = 0) buffer Colors {\n"
-      "  uint color[(" STR(WIDTH) "*" STR(HEIGHT) " )/4];\n" 
+      "  uint color[];\n" 
       "};\n"
       "void main() {\n"
       "  uint x = uint((gl_FragCoord.x + u_pos_and_scale.x)/u_pos_and_scale.z);\n"
@@ -263,16 +219,24 @@ int main() {
   unsigned int VAO;
   glGenVertexArrays(1, &VAO);
 
-  unsigned int SSBO;
-  glGenBuffers(1, &SSBO);
-  glBindBuffer(GL_SHADER_STORAGE_BUFFER, SSBO);
+  unsigned int SSBO_first;
+  glGenBuffers(1, &SSBO_first);
+  glBindBuffer(GL_SHADER_STORAGE_BUFFER, SSBO_first);
   glBufferData(GL_SHADER_STORAGE_BUFFER, WORLD_BYTES, NULL, GL_DYNAMIC_DRAW);
   glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
-  glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, SSBO);
-  randomize_world(SSBO);
+  glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, SSBO_first);
+  randomize_world(SSBO_first);
+  unsigned int SSBO_second;
+  glGenBuffers(1, &SSBO_second);
+  glBindBuffer(GL_SHADER_STORAGE_BUFFER, SSBO_second);
+  glBufferData(GL_SHADER_STORAGE_BUFFER, WORLD_BYTES, NULL, GL_DYNAMIC_DRAW);
+  glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+  glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, SSBO_second);
 
-  struct cudaGraphicsResource *SSBO_CUDA;
-  Chk(cudaGraphicsGLRegisterBuffer(&SSBO_CUDA, SSBO, cudaGraphicsMapFlagsNone));
+  struct cudaGraphicsResource *SSBO_CUDA_first;
+  Chk(cudaGraphicsGLRegisterBuffer(&SSBO_CUDA_first, SSBO_first, cudaGraphicsMapFlagsNone));
+  struct cudaGraphicsResource *SSBO_CUDA_second;
+  Chk(cudaGraphicsGLRegisterBuffer(&SSBO_CUDA_second, SSBO_second, cudaGraphicsMapFlagsNone));
 
   int u_pos_and_scale_location =
       glGetUniformLocation(shader_program, "u_pos_and_scale");
@@ -282,7 +246,7 @@ int main() {
   while (!glfwWindowShouldClose(window)) {
     glfwPollEvents();
     if (glfwGetKey(window, GLFW_KEY_R) == GLFW_PRESS) {
-      randomize_world(SSBO);
+      randomize_world(SSBO_first);
     }
     float speed = 500.f * dt;
     if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) {
@@ -316,12 +280,20 @@ int main() {
     // Current bottleneck
     // if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) {
     if (!false) {
-      Chk(cudaGraphicsMapResources(1, &SSBO_CUDA, 0));
-      void *ssbo_mapped_to_cuda;
-      Chk(cudaGraphicsResourceGetMappedPointer(&ssbo_mapped_to_cuda, NULL,
-                                               SSBO_CUDA));
-      transform_world((char *)ssbo_mapped_to_cuda, WIDTH, HEIGHT);
-      cudaGraphicsUnmapResources(1, &SSBO_CUDA);
+      Chk(cudaGraphicsMapResources(1, &SSBO_CUDA_first, 0));
+      void *ssbo_first_mapped_to_cuda;
+      Chk(cudaGraphicsResourceGetMappedPointer(&ssbo_first_mapped_to_cuda, NULL,
+                                               SSBO_CUDA_first));
+
+      Chk(cudaGraphicsMapResources(1, &SSBO_CUDA_second, 0));
+      void *ssbo_second_mapped_to_cuda;
+      Chk(cudaGraphicsResourceGetMappedPointer(&ssbo_second_mapped_to_cuda, NULL,
+                                               SSBO_CUDA_second));
+
+      transform_world((unsigned char *)ssbo_first_mapped_to_cuda, (unsigned char *)ssbo_second_mapped_to_cuda);
+      cudaMemcpy(ssbo_first_mapped_to_cuda, ssbo_second_mapped_to_cuda, WORLD_BYTES, cudaMemcpyDeviceToDevice);
+      cudaGraphicsUnmapResources(1, &SSBO_CUDA_first);
+      cudaGraphicsUnmapResources(1, &SSBO_CUDA_second);
     }
 
     {
@@ -348,7 +320,6 @@ int main() {
     }
 
     glfwSwapBuffers(window);
-    // glFlush();
   }
   glfwDestroyWindow(window);
   glfwTerminate();

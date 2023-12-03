@@ -31,4 +31,6 @@ maybe:
 
 - as previous, but now we have a OpenGL SSBO (shader storage buffer object) which CUDA writes directly to, and OpenGL draws it immediately. So now the CPU basically does nothing. The shader does bit operations to get the right state of it's cell - 900 fps 
 
-- Tested doing shared memory where blocks filled in for each other's corners, but got exact same framerate
+- Tested doing shared memory where blocks filled in for each other's corners, but got exact same framerate, so reverted this change
+
+- now I have a second SSBO that I write to, to prevent race conditions - which I noticed sometimes when writing to the buffer I was also reading from at the same time. Still 900 fps, could possibly optimize it by swapping the buffers roles each frame.
