@@ -38,8 +38,11 @@ infection like infinite spreading:
 grid spawning more grids: 1-alive, else-dead
 ![](griddy.gif)
 
-screenshot from same: 
+screenshot from same rules: 
 ![](griddy_pic.png)
+
+fractally one:
+![](fractally.gif)
 
 ### facts:
 

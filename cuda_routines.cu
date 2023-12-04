@@ -33,10 +33,10 @@ __global__ void transform_cell(const unsigned char *const world,
     next_state = CELL_ALIVE;
     break;
   case 2:
-    next_state = CELL_DEAD;
+    next_state = cur_state;
     break;
   case 3:
-    next_state = CELL_DEAD;
+    next_state = cur_state;
     break;
   default:
     next_state = CELL_DEAD;
