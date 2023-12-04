@@ -32,6 +32,9 @@ Eye of the abyss:
 (middle:)
 ![](abyss_middle.png)
 
+infection like infinite spreading:
+![](infection.png)
+
 ### facts:
 
 - OLD: gets around 30 fps currently at startup when doing 2048x2048 cells

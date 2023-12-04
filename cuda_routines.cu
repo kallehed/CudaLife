@@ -27,13 +27,13 @@ __global__ void transform_cell(const unsigned char *const world,
   // }
   switch (neighbors) {
   case 0:
-    next_state = cur_state;
+    next_state = CELL_DEAD;
     break;
   case 1:
     next_state = cur_state;
     break;
   case 2:
-    next_state = CELL_ALIVE;
+    next_state = cur_state;
     break;
   case 3:
     next_state = CELL_ALIVE;
