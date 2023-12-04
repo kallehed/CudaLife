@@ -17,6 +17,14 @@ maybe:
 - press space to pause simulation
 - left click with mouse to place life
 
+### Images
+
+Normal game of life ruleset:
+![](normal_rule0.gif)
+
+Trying out a weird rule, 1-dead, 2-same, 3-alive, else-dead
+![](weird_rules0.gif)
+
 ### facts:
 
 - OLD: gets around 30 fps currently at startup when doing 2048x2048 cells

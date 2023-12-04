@@ -25,6 +25,20 @@ __global__ void transform_cell(const unsigned char *const world,
   default:
     next_state = CELL_DEAD;
   }
+  // switch (neighbors) {
+  // case 0:
+  //   next_state = CELL_ALIVE;
+  // case 1:
+  //   next_state = CELL_DEAD;
+  // case 2:
+  //   next_state = cur_state;
+  //   break;
+  // case 3:
+  //   next_state = CELL_ALIVE;
+  //   break;
+  // default:
+  //   next_state = CELL_DEAD;
+  // }
   write_world[place] = next_state;
 }
 
