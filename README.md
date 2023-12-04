@@ -5,7 +5,7 @@
 - have OpenGL
 
 ### Compile
-- `nvcc main.cu glad.c -lglfw -o main`
+- `nvcc main.cu opengl_related.cu cuda_routines.cu glad.c -lglfw -o main`
 ### Run 
 - `__NV_PRIME_RENDER_OFFLOAD=true __GLX_VENDOR_LIBRARY_NAME=nvidia ./main`
 maybe:
@@ -14,6 +14,8 @@ maybe:
 ### How to use: 
 - WASD to move 
 - I and O to zoom In and Out
+- press space to pause simulation
+- left click with mouse to place life
 
 ### facts:
 

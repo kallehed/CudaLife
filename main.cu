@@ -8,64 +8,7 @@
 
 #include <cuda_gl_interop.h>
 
-#define STR_INDIR(x) #x
-#define STR(x) STR_INDIR(x)
-
-#define Chk(ans)                                                               \
-  { gpuAssert((ans), __FILE__, __LINE__); }
-inline void gpuAssert(cudaError_t code, const char *file, int line,
-                      bool abort = true) {
-  if (code != cudaSuccess) {
-    fprintf(stderr, "GPUassert: %s %s %d\n", cudaGetErrorString(code), file,
-            line);
-    if (abort)
-      exit(code);
-  }
-}
-
-__global__ void array2D_set(unsigned char *a, const long width,
-                            const unsigned char val) {
-  a[(threadIdx.x + blockIdx.x * blockDim.x) +
-    (threadIdx.y + blockIdx.y * blockDim.y) * width] = val;
-}
-
-#define CELL_DEAD 0
-#define CELL_ALIVE 1
-
-// width and height of game of life cell 2D array
-#define WIDTH 2048
-#define HEIGHT 2048
-static constexpr long WORLD_BYTES = sizeof(unsigned char) * WIDTH * HEIGHT;
-static constexpr dim3 BLOCKDIM_WORLD =
-    dim3{32, 32, 1}; // 32 * 32 is the maximum block
-static constexpr dim3 GRIDDIM_WORLD = dim3{WIDTH / 32, HEIGHT / 32, 1};
-
-__global__ void transform_cell(const unsigned char *const world,
-                               unsigned char *write_world) {
-  const long x = blockIdx.x * blockDim.x + threadIdx.x;
-  const long y = blockIdx.y * blockDim.y + threadIdx.y;
-  if (x == 0 || x == WIDTH - 1 || y == 0 || y == HEIGHT - 1)
-    return;
-  const long place = x + y * WIDTH;
-  const unsigned char cur_state = world[place];
-  const unsigned char neighbors =
-      world[place + 1] + world[place - 1] + world[place + WIDTH] +
-      world[place - WIDTH] + world[place + 1 - WIDTH] +
-      world[place + 1 + WIDTH] + world[place - 1 + WIDTH] +
-      world[place - 1 - WIDTH];
-  unsigned char next_state;
-  switch (neighbors) {
-  case 2:
-    next_state = cur_state;
-    break;
-  case 3:
-    next_state = CELL_ALIVE;
-    break;
-  default:
-    next_state = CELL_DEAD;
-  }
-  write_world[place] = next_state;
-}
+#include "project_header.cuh"
 
 void draw_world_in_terminal(const unsigned char *const world) {
   for (long i = 0; i < HEIGHT; ++i) {
@@ -86,33 +29,16 @@ void draw_world_in_terminal(const unsigned char *const world) {
   puts("--------------------------------");
 }
 
-static void transform_world(const unsigned char *const read_world,
-                            unsigned char *const write_world) {
-  transform_cell<<<GRIDDIM_WORLD, BLOCKDIM_WORLD>>>(read_world, write_world);
-  cudaDeviceSynchronize();
-}
-
-// slow, copies using OpenGL, inits on CPU
-static void randomize_world(unsigned int SSBO) {
-  unsigned char *data = (unsigned char *)malloc(WORLD_BYTES);
-  for (int i = 0; i < HEIGHT; ++i) {
-    for (int j = 0; j < WIDTH; ++j) {
-      unsigned char value;
-      if (i == 0 || i == HEIGHT - 1 || j == 0 || j == WIDTH - 1) {
-        value = 0;
-      } else {
-        value = rand() % 2;
-      }
-      data[i * WIDTH + j] = value;
-    }
+static bool g_space_just_pressed;
+static void key_callback(GLFWwindow *window, int key, int scancode, int action,
+                         int mods) {
+  if (key == GLFW_KEY_SPACE && action == GLFW_PRESS) {
+    g_space_just_pressed = true;
   }
-  glBindBuffer(GL_SHADER_STORAGE_BUFFER, SSBO);
-  glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, WORLD_BYTES, data);
-  glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
-  free(data);
 }
-int g_current_window_width = 1024, g_current_window_height = 1024;
-void framebuffer_size_callback(GLFWwindow *window, int width, int height) {
+static int g_current_window_width = 1024, g_current_window_height = 1024;
+static void framebuffer_size_callback(GLFWwindow *window, int width,
+                                      int height) {
   glViewport(0, 0, width, height);
   g_current_window_width = width;
   g_current_window_height = height;
@@ -141,80 +67,9 @@ int main() {
   glViewport(0, 0, g_current_window_width, g_current_window_height);
   glfwSwapInterval(SWAP_INTERVAL);
   glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
+  glfwSetKeyCallback(window, key_callback);
 
-  const char *const vertex_shader_source =
-      "#version 460\n"
-      "float x_pos[6] = float[6](-1.f, -1.f, 1.f, -1.f, 1.f, 1.f); \n"
-      "float y_pos[6] = float[6](-1.f, 1.f, 1.f, -1.f, 1.f, -1.f); \n"
-      "void main()\n"
-      "{\n"
-      " float x = x_pos[gl_VertexID];"
-      " float y = y_pos[gl_VertexID];"
-      " gl_Position = vec4(x, y, 0.f, 1.0);\n"
-      "}\0";
-  unsigned int vertex_shader = glCreateShader(GL_VERTEX_SHADER);
-  glShaderSource(vertex_shader, 1, &vertex_shader_source, NULL);
-  glCompileShader(vertex_shader);
-  {
-    int success;
-    char infoLog[512];
-    glGetShaderiv(vertex_shader, GL_COMPILE_STATUS, &success);
-    if (!success) {
-      glGetShaderInfoLog(vertex_shader, 512, NULL, infoLog);
-      printf("ERROR::SHADER::VERTEX::COMPILATION_FAILED\n %s\n", infoLog);
-    }
-  }
-  // clang-format off
-  const char *const fragment_shader_source =
-      "#version 460 core\n"
-      "out vec4 FragColor;\n"
-      "uniform vec4 u_pos_and_scale;"
-      "layout (std430, binding = 0) buffer Colors {\n"
-      "  uint color[];\n" 
-      "};\n"
-      "void main() {\n"
-      "  uint x = uint((gl_FragCoord.x + u_pos_and_scale.x)/u_pos_and_scale.z);\n"
-      "  uint y = uint((gl_FragCoord.y + u_pos_and_scale.y)/u_pos_and_scale.w);\n"
-      "  uint idx = x + y * " STR(WIDTH) ";\n"
-      "  uint block = idx / 4;\n"
-      "  uint byte = idx % 4;\n"
-      "  uint col4 = color[block];\n"
-      "  uint mask = (0x000000FF << (byte * 8));\n"
-      "  uint colbool =  mask & col4;\n"
-      "  float col = float(colbool);\n"
-      "  if (x >= " STR(WIDTH) " || y >= " STR(HEIGHT) ") {col = 0.5;}"
-      "  FragColor = vec4(vec3(float(col)), 1.0f);\n"
-      "}\n";
-  // clang-format on
-  unsigned int fragment_shader;
-  fragment_shader = glCreateShader(GL_FRAGMENT_SHADER);
-  glShaderSource(fragment_shader, 1, &fragment_shader_source, NULL);
-  glCompileShader(fragment_shader);
-  {
-    int success;
-    char infoLog[512];
-    glGetShaderiv(fragment_shader, GL_COMPILE_STATUS, &success);
-    if (!success) {
-      glGetShaderInfoLog(fragment_shader, 512, NULL, infoLog);
-      printf("ERROR::SHADER::FRAGMENT::COMPILATION_FAILED\n %s\n", infoLog);
-    }
-  }
-  unsigned int shader_program;
-  shader_program = glCreateProgram();
-  glAttachShader(shader_program, vertex_shader);
-  glAttachShader(shader_program, fragment_shader);
-  glLinkProgram(shader_program);
-  {
-    int success;
-    char infoLog[512];
-    glGetProgramiv(shader_program, GL_LINK_STATUS, &success);
-    if (!success) {
-      glGetProgramInfoLog(shader_program, 512, NULL, infoLog);
-      printf("ERROR::PROGRAM::COMPILATION_FAILED\n %s\n", infoLog);
-    }
-  }
-  glDeleteShader(vertex_shader);
-  glDeleteShader(fragment_shader);
+  unsigned int shader_program = get_program();
 
   unsigned int VAO;
   glGenVertexArrays(1, &VAO);
@@ -234,16 +89,20 @@ int main() {
   glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, SSBO_second);
 
   struct cudaGraphicsResource *SSBO_CUDA_first;
-  Chk(cudaGraphicsGLRegisterBuffer(&SSBO_CUDA_first, SSBO_first, cudaGraphicsMapFlagsNone));
+  Chk(cudaGraphicsGLRegisterBuffer(&SSBO_CUDA_first, SSBO_first,
+                                   cudaGraphicsMapFlagsNone));
   struct cudaGraphicsResource *SSBO_CUDA_second;
-  Chk(cudaGraphicsGLRegisterBuffer(&SSBO_CUDA_second, SSBO_second, cudaGraphicsMapFlagsNone));
+  Chk(cudaGraphicsGLRegisterBuffer(&SSBO_CUDA_second, SSBO_second,
+                                   cudaGraphicsMapFlagsNone));
 
   int u_pos_and_scale_location =
       glGetUniformLocation(shader_program, "u_pos_and_scale");
   float pos_x = 0.f, pos_y = 0.f, scale = 1.f;
+  bool should_transform = true;
 
   double dt = 0.16, prev_time = 0.0;
   while (!glfwWindowShouldClose(window)) {
+    g_space_just_pressed = false;
     glfwPollEvents();
     if (glfwGetKey(window, GLFW_KEY_R) == GLFW_PRESS) {
       randomize_world(SSBO_first);
@@ -276,10 +135,37 @@ int main() {
       pos_y -= (pos_y + (float)(g_current_window_height >> 1)) * scale_speed *
                (1.f / scale);
     }
+    if (glfwGetKey(window, GLFW_KEY_T) == GLFW_PRESS) {
+      terminate_all_life_in_world(SSBO_first);
+    }
+    if (g_space_just_pressed) {
+      should_transform = !should_transform;
+    }
+
+    // mouse input
+    {
+      bool left_click =
+          glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
+      bool right_click =
+          glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
+      if (left_click || right_click) {
+        double x, y;
+        glfwGetCursorPos(window, &x, &y);
+        y = HEIGHT / 2 - y;
+        // printf("pos: %f, %f, real: %f, %f\n", x, y, pos_x, pos_y);
+
+        double real_x = (pos_x + x) / scale;
+        double real_y = (pos_y + y) / scale;
+        // printf("actual: %f, %f\n", real_x, real_y);
+        {
+          int cell_x = real_x, cell_y = real_y;
+          world_set_cell(SSBO_first, cell_x, cell_y, left_click ? 1 : 0);
+        }
+      }
+    }
 
     // Current bottleneck
-    // if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) {
-    if (!false) {
+    if (should_transform) { // transform world
       Chk(cudaGraphicsMapResources(1, &SSBO_CUDA_first, 0));
       void *ssbo_first_mapped_to_cuda;
       Chk(cudaGraphicsResourceGetMappedPointer(&ssbo_first_mapped_to_cuda, NULL,
@@ -287,16 +173,20 @@ int main() {
 
       Chk(cudaGraphicsMapResources(1, &SSBO_CUDA_second, 0));
       void *ssbo_second_mapped_to_cuda;
-      Chk(cudaGraphicsResourceGetMappedPointer(&ssbo_second_mapped_to_cuda, NULL,
-                                               SSBO_CUDA_second));
+      Chk(cudaGraphicsResourceGetMappedPointer(&ssbo_second_mapped_to_cuda,
+                                               NULL, SSBO_CUDA_second));
 
-      transform_world((unsigned char *)ssbo_first_mapped_to_cuda, (unsigned char *)ssbo_second_mapped_to_cuda);
-      cudaMemcpy(ssbo_first_mapped_to_cuda, ssbo_second_mapped_to_cuda, WORLD_BYTES, cudaMemcpyDeviceToDevice);
+      transform_world(
+          (unsigned char *)ssbo_first_mapped_to_cuda, // IMPORTANT LINE
+          (unsigned char *)ssbo_second_mapped_to_cuda);
+      cudaMemcpy(ssbo_first_mapped_to_cuda, ssbo_second_mapped_to_cuda,
+                 WORLD_BYTES, cudaMemcpyDeviceToDevice);
+
       cudaGraphicsUnmapResources(1, &SSBO_CUDA_first);
       cudaGraphicsUnmapResources(1, &SSBO_CUDA_second);
     }
 
-    {
+    { // set delta time
       double time = glfwGetTime();
       dt = time - prev_time;
       prev_time = time;
@@ -304,14 +194,14 @@ int main() {
     glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
 
-    if (!false) {
+    { // draw to screen
       glUseProgram(shader_program);
       glUniform4f(u_pos_and_scale_location, pos_x, pos_y, scale, scale);
       glBindVertexArray(VAO);
       glDrawArrays(GL_TRIANGLES, 0, 6);
     }
 
-    if (!false) {
+    { // set window title to framerate
       char buf[256];
       int written =
           snprintf(buf, sizeof(buf) - 1, "CudaLife: fps: %f", 1.f / dt);
