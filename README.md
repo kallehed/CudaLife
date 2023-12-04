@@ -8,8 +8,6 @@
 - `nvcc main.cu opengl_related.cu cuda_routines.cu glad.c -lglfw -o main`
 ### Run 
 - `__NV_PRIME_RENDER_OFFLOAD=true __GLX_VENDOR_LIBRARY_NAME=nvidia ./main`
-maybe:
-
 
 ### How to use: 
 - WASD to move 
@@ -24,6 +22,9 @@ Normal game of life ruleset:
 
 Trying out a weird rule, 1-dead, 2-same, 3-alive, else-dead
 ![](weird_rule0.gif)
+
+Inkblot-like pattern from 0,1,2,3-alive, else-dead (this one flashes violently)
+![](inkblot.png)
 
 ### facts:
 
