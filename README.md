@@ -50,6 +50,9 @@ sandy one: 0-same, 1-same, 2-same, 3-alive, else-dead
 cheese: 0-alive, 1-same, 2-same, 3-same, 4-dead, else-alive
 ![](cheese.png)
 
+diamond: 0-alive, 1-same, 2-same, 3-dead, 4-dead, else-alive  
+![](diamond.gif)
+
 ### facts:
 
 - OLD: gets around 30 fps currently at startup when doing 2048x2048 cells
