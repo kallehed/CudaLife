@@ -47,6 +47,9 @@ fractally one: 0-dead, 1-alive, 2-same, 3-same, else-dead
 sandy one: 0-same, 1-same, 2-same, 3-alive, else-dead
 ![](sandy.gif)
 
+cheese: 0-alive, 1-same, 2-same, 3-same, 4-dead, else-alive
+![](cheese.png)
+
 ### facts:
 
 - OLD: gets around 30 fps currently at startup when doing 2048x2048 cells
