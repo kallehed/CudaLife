@@ -23,7 +23,7 @@ Normal game of life ruleset:
 ![](normal_rule0.gif)
 
 Trying out a weird rule, 1-dead, 2-same, 3-alive, else-dead
-![](weird_rules0.gif)
+![](weird_rule0.gif)
 
 ### facts:
 
