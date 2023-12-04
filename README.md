@@ -35,6 +35,12 @@ Eye of the abyss:
 infection like infinite spreading:
 ![](infection.png)
 
+grid spawning more grids: 1-alive, else-dead
+![](griddy.gif)
+
+screenshot from same: 
+![](griddy_pic.png)
+
 ### facts:
 
 - OLD: gets around 30 fps currently at startup when doing 2048x2048 cells
