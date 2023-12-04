@@ -26,6 +26,12 @@ Trying out a weird rule, 1-dead, 2-same, 3-alive, else-dead
 Inkblot-like pattern from 0,1,2,3-alive, else-dead (this one flashes violently)
 ![](inkblot.png)
 
+Eye of the abyss: 
+![](abyss.png)
+
+(middle:)
+![](abyss_middle.png)
+
 ### facts:
 
 - OLD: gets around 30 fps currently at startup when doing 2048x2048 cells
