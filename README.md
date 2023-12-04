@@ -41,8 +41,11 @@ grid spawning more grids: 1-alive, else-dead
 screenshot from same rules: 
 ![](griddy_pic.png)
 
-fractally one:
+fractally one: 0-dead, 1-alive, 2-same, 3-same, else-dead  
 ![](fractally.gif)
+
+sandy one: 0-same, 1-same, 2-same, 3-alive, else-dead
+![](sandy.gif)
 
 ### facts:
 
