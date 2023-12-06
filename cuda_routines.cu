@@ -31,35 +31,30 @@ __global__ void transform_cell(const unsigned char *const world,
     break;
   case 1:
     next_state = CELL_DEAD;
-    next_state = cur_state;
     break;
   case 2:
-    next_state = cur_state;
+    next_state = CELL_DEAD;
     break;
   case 3:
-    next_state = cur_state;
-    next_state = CELL_DEAD;
     next_state = CELL_ALIVE;
-    next_state = CELL_DEAD;
     break;
   case 4:
     next_state = cur_state;
-    next_state = CELL_DEAD;
-    next_state = cur_state;
-    next_state = CELL_ALIVE;
     break;
   case 5:
-    next_state = cur_state;
     next_state = CELL_DEAD;
-    next_state = CELL_ALIVE;
     break;
   case 6:
     next_state = CELL_ALIVE;
-    next_state = CELL_DEAD;
+    break;
+  case 7:
+    next_state = CELL_ALIVE;
+    break;
+  case 8:
+    next_state = CELL_ALIVE;
     break;
   default:
     next_state = CELL_DEAD;
-    next_state = CELL_ALIVE;
   }
   write_world[place] = next_state;
 }

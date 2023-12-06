@@ -65,6 +65,9 @@ pascal's triangle: 0-dead, 1-alive, 2-same, 3-dead, 4-dead, 5-same, else-dead
 mold: 0-dead, 1-same, 2-same, 3-dead, 4-alive, 5-alive, 6-dead, else-alive       
 ![](mold.gif)
 
+membranes: 0-dead, 1-dead, 2-dead, 3-alive, 4-same, 5-dead, 6-alive, 7-alive, 8-alive
+![](membranes.png)
+
 ### facts:
 
 - OLD: gets around 30 fps currently at startup when doing 2048x2048 cells
