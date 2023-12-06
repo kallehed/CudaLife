@@ -44,6 +44,9 @@ __global__ void transform_cell(const unsigned char *const world,
   case 5:
     next_state = CELL_DEAD;
     break;
+  case 6:
+    next_state = CELL_DEAD;
+    break;
   default:
     next_state = CELL_ALIVE;
   }

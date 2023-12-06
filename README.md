@@ -56,6 +56,9 @@ diamond: 0-alive, 1-same, 2-same, 3-dead, 4-dead, else-alive
 systemic: 0-alive 1-dead, 2-same, 3-same, 4-dead, 5-dead, else-alive  
 ![](systemic.gif)
 
+pyramid: 0-alive 1-dead, 2-same, 3-same, 4-dead, 5-dead, 6-dead else-alive  
+![](pyramid.gif)
+
 ### facts:
 
 - OLD: gets around 30 fps currently at startup when doing 2048x2048 cells
