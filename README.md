@@ -59,8 +59,11 @@ systemic: 0-alive 1-dead, 2-same, 3-same, 4-dead, 5-dead, else-alive
 pyramid: 0-alive 1-dead, 2-same, 3-same, 4-dead, 5-dead, 6-dead else-alive  
 ![](pyramid.gif)
 
-pascal's triangle: 
+pascal's triangle: 0-dead, 1-alive, 2-same, 3-dead, 4-dead, 5-same, else-dead
 ![](pascal.png)
+
+mold: 0-dead, 1-same, 2-same, 3-dead, 4-alive, 5-alive, 6-dead, else-alive       
+![](mold.gif)
 
 ### facts:
 
